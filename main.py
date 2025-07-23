@@ -143,3 +143,8 @@ def delete_ticket(ticket_id: int):
     tickets = [t for t in tickets if t["id"] != ticket_id]
     save_tickets(tickets)
     return RedirectResponse(url="/dashboard", status_code=302)
+
+@app.get("/logout")
+def logout(request: Request):
+    request.session.clear()  # Clear the session data
+    return RedirectResponse(url="/login", status_code=302)
