@@ -292,8 +292,9 @@ def delete_ticket(ticket_id: int):
     save_tickets(tickets)
     return RedirectResponse(url="/dashboard", status_code=302)
 
-@app.get("/logout")
+@app.post("/logout")
 async def logout(request: Request):
     request.session.clear()
-    return RedirectResponse(url="/login", status_code=302)
+    return RedirectResponse(url="/login", status_code=303)
+
 
