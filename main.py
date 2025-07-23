@@ -6,12 +6,15 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.status import HTTP_302_FOUND
 import models
 import database
+import os
 
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key="supersecretkey")  # Replace with a real secret in production
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory=os.path.join("app", "static")), name="static")
+
+templates = Jinja2Templates(directory=os.path.join("app", "templates"))
+
 
 # Dummy credentials
 USER_CREDENTIALS = {
