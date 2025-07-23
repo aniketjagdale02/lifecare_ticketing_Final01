@@ -2,11 +2,12 @@ from fastapi import FastAPI, Request, Form, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 import json
 import os
 
 app = FastAPI()
-
+app.add_middleware(SessionMiddleware, secret_key="lifecare_session_2025")
 # Mount static files
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
