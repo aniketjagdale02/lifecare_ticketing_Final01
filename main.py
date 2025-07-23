@@ -1,132 +1,124 @@
-from fastapi import FastAPI, Request, Form, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Request, Form, status, HTTPException
+from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.sessions import SessionMiddleware
 from fastapi.templating import Jinja2Templates
-import sqlite3
+from starlette.middleware.sessions import SessionMiddleware
+import json
 import os
+from uuid import uuid4
 
 app = FastAPI()
+app.add_middleware(SessionMiddleware, secret_key="verysecretkey")
 
-# Mount static files
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
-
-# Add session middleware
-app.add_middleware(SessionMiddleware, secret_key="supersecretkey")
-
-# Setup templates
 templates = Jinja2Templates(directory="app/templates")
 
-# Utility to get DB connection
-def get_db_connection():
-    conn = sqlite3.connect("ticketing.db")
-    conn.row_factory = sqlite3.Row
-    return conn
+DATA_FILE = "tickets.json"
 
-# -------------------------------
-# Login Page
-# -------------------------------
+# Utility to load/save tickets
+def load_tickets():
+    if not os.path.exists(DATA_FILE):
+        return []
+    with open(DATA_FILE, "r") as f:
+        return json.load(f)
 
-@app.get("/login", response_class=HTMLResponse)
-def login_get(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+def save_tickets(tickets):
+    with open(DATA_FILE, "w") as f:
+        json.dump(tickets, f, indent=2)
 
+@app.get("/", response_class=HTMLResponse)
+def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request, "error": None})
 
 @app.post("/login")
-def login_post(request: Request, username: str = Form(...), password: str = Form(...)):
-    # Dummy check - replace with real user validation
-    if username == "admin" and password == "admin":
+def login(request: Request, username: str = Form(...), password: str = Form(...)):
+    if username == "admin" and password == "admin123":
         request.session["user"] = username
-        return RedirectResponse(url="/dashboard", status_code=302)
+        return RedirectResponse("/dashboard", status_code=302)
     return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
 
+@app.get("/dashboard")
+def dashboard(request: Request):
+    if "user" not in request.session:
+        return RedirectResponse("/", status_code=302)
+    tickets = load_tickets()
+    return templates.TemplateResponse("dashboard_ticket.html", {"request": request, "tickets": tickets})
 
-# -------------------------------
-# Logout
-# -------------------------------
+@app.get("/create")
+def create_ticket_page(request: Request):
+    if "user" not in request.session:
+        return RedirectResponse("/", status_code=302)
+    return templates.TemplateResponse("create_ticket.html", {"request": request})
+
+@app.post("/create")
+def create_ticket(request: Request, customer_name: str = Form(...), email: str = Form(...),
+                  contact: str = Form(...), issue_title: str = Form(...),
+                  description: str = Form(...), status: str = Form(...),
+                  assigned_to: str = Form(...), priority: str = Form(...), category: str = Form(...)):
+    if "user" not in request.session:
+        return RedirectResponse("/", status_code=302)
+    tickets = load_tickets()
+    new_ticket = {
+        "id": str(uuid4()),
+        "customer_name": customer_name,
+        "email": email,
+        "contact": contact,
+        "issue_title": issue_title,
+        "description": description,
+        "status": status,
+        "assigned_to": assigned_to,
+        "priority": priority,
+        "category": category
+    }
+    tickets.append(new_ticket)
+    save_tickets(tickets)
+    return RedirectResponse("/dashboard", status_code=302)
+
+@app.get("/edit/{ticket_id}")
+def edit_ticket_page(request: Request, ticket_id: str):
+    if "user" not in request.session:
+        return RedirectResponse("/", status_code=302)
+    tickets = load_tickets()
+    ticket = next((t for t in tickets if t["id"] == ticket_id), None)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return templates.TemplateResponse("edit_ticket.html", {"request": request, "ticket": ticket})
+
+@app.post("/edit/{ticket_id}")
+def edit_ticket(request: Request, ticket_id: str, customer_name: str = Form(...), email: str = Form(...),
+                contact: str = Form(...), issue_title: str = Form(...),
+                description: str = Form(...), status: str = Form(...),
+                assigned_to: str = Form(...), priority: str = Form(...), category: str = Form(...)):
+    if "user" not in request.session:
+        return RedirectResponse("/", status_code=302)
+    tickets = load_tickets()
+    for t in tickets:
+        if t["id"] == ticket_id:
+            t.update({
+                "customer_name": customer_name,
+                "email": email,
+                "contact": contact,
+                "issue_title": issue_title,
+                "description": description,
+                "status": status,
+                "assigned_to": assigned_to,
+                "priority": priority,
+                "category": category
+            })
+            break
+    save_tickets(tickets)
+    return RedirectResponse("/dashboard", status_code=302)
+
+@app.get("/delete/{ticket_id}")
+def delete_ticket(request: Request, ticket_id: str):
+    if "user" not in request.session:
+        return RedirectResponse("/", status_code=302)
+    tickets = load_tickets()
+    tickets = [t for t in tickets if t["id"] != ticket_id]
+    save_tickets(tickets)
+    return RedirectResponse("/dashboard", status_code=302)
 
 @app.get("/logout")
 def logout(request: Request):
     request.session.clear()
-    return RedirectResponse(url="/login", status_code=302)
-
-
-# -------------------------------
-# Dashboard (Auth-protected)
-# -------------------------------
-
-@app.get("/dashboard", response_class=HTMLResponse)
-def dashboard(request: Request):
-    if "user" not in request.session:
-        return RedirectResponse(url="/login", status_code=302)
-    
-    conn = get_db_connection()
-    tickets = conn.execute("SELECT * FROM tickets").fetchall()
-    conn.close()
-    
-    return templates.TemplateResponse("dashboard.html", {"request": request, "tickets": tickets})
-
-
-# -------------------------------
-# Create Ticket
-# -------------------------------
-
-@app.get("/create", response_class=HTMLResponse)
-def create_ticket_get(request: Request):
-    if "user" not in request.session:
-        return RedirectResponse(url="/login", status_code=302)
-    return templates.TemplateResponse("create_ticket.html", {"request": request})
-
-
-@app.post("/create")
-def create_ticket_post(request: Request, title: str = Form(...), description: str = Form(...)):
-    if "user" not in request.session:
-        return RedirectResponse(url="/login", status_code=302)
-    
-    conn = get_db_connection()
-    conn.execute("INSERT INTO tickets (title, description) VALUES (?, ?)", (title, description))
-    conn.commit()
-    conn.close()
-    
-    return RedirectResponse(url="/dashboard", status_code=302)
-
-
-# -------------------------------
-# Edit Ticket
-# -------------------------------
-
-@app.get("/edit/{ticket_id}", response_class=HTMLResponse)
-def edit_ticket_get(request: Request, ticket_id: int):
-    if "user" not in request.session:
-        return RedirectResponse(url="/login", status_code=302)
-    
-    conn = get_db_connection()
-    ticket = conn.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
-    conn.close()
-    
-    if not ticket:
-        return HTMLResponse(content="Ticket not found", status_code=404)
-    
-    return templates.TemplateResponse("edit_ticket.html", {"request": request, "ticket": ticket})
-
-
-@app.post("/edit/{ticket_id}")
-def edit_ticket_post(request: Request, ticket_id: int, title: str = Form(...), description: str = Form(...)):
-    if "user" not in request.session:
-        return RedirectResponse(url="/login", status_code=302)
-    
-    conn = get_db_connection()
-    conn.execute("UPDATE tickets SET title = ?, description = ? WHERE id = ?", (title, description, ticket_id))
-    conn.commit()
-    conn.close()
-    
-    return RedirectResponse(url="/dashboard", status_code=302)
-
-
-# -------------------------------
-# Home Redirect
-# -------------------------------
-
-@app.get("/")
-def root():
-    return RedirectResponse(url="/login", status_code=302)
+    return RedirectResponse("/", status_code=302)
