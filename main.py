@@ -44,8 +44,12 @@ def authenticate_user(username, password):
 
 # Routes
 @app.get("/", response_class=HTMLResponse)
-def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+def home(request: Request):
+    username = request.cookies.get("username")
+    if username:
+        return RedirectResponse("/dashboard")
+    return RedirectResponse("/login")
+
 
 @app.post("/login")
 def login(request: Request, username: str = Form(...), password: str = Form(...)):
