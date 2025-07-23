@@ -1,56 +1,69 @@
 from fastapi import FastAPI, Request, Form, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from typing import Optional
-import json, os
+import json
+import os
 
 app = FastAPI()
 
+# Mount static files
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+# Templates path
 templates = Jinja2Templates(directory="app/templates")
 
-# Simulate login (hardcoded)
-VALID_USERS = {
-    "admin": "admin123",
-    "aniket": "1234"
-}
+# File paths
+TICKETS_FILE = "app/tickets.json"
+USERS_FILE = "app/users.json"
 
-# Tickets stored in a JSON file
-TICKET_FILE = "app/tickets.json"
-if not os.path.exists(TICKET_FILE):
-    with open(TICKET_FILE, "w") as f:
-        json.dump([], f)
+# Utility Functions
+def load_tickets():
+    if not os.path.exists(TICKETS_FILE):
+        return []
+    with open(TICKETS_FILE, "r") as f:
+        return json.load(f)
 
-# -------------------- Routes ----------------------
+def save_tickets(tickets):
+    with open(TICKETS_FILE, "w") as f:
+        json.dump(tickets, f, indent=2)
 
-@app.get("/")
-def login_form(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+def load_users():
+    if not os.path.exists(USERS_FILE):
+        return []
+    with open(USERS_FILE, "r") as f:
+        return json.load(f)
+
+def authenticate_user(username, password):
+    users = load_users()
+    for user in users:
+        if user["username"] == username and user["password"] == password:
+            return True
+    return False
+
+# Routes
+@app.get("/", response_class=HTMLResponse)
+def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
 
 @app.post("/login")
 def login(request: Request, username: str = Form(...), password: str = Form(...)):
-    if VALID_USERS.get(username) == password:
-        response = RedirectResponse("/dashboard", status_code=status.HTTP_302_FOUND)
-        response.set_cookie(key="user", value=username)
+    if authenticate_user(username, password):
+        response = RedirectResponse(url="/dashboard", status_code=status.HTTP_302_FOUND)
+        response.set_cookie(key="username", value=username)
         return response
     return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
 
-@app.get("/dashboard")
+@app.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request):
-    user = request.cookies.get("user")
-    if not user:
-        return RedirectResponse("/", status_code=302)
+    username = request.cookies.get("username")
+    if not username:
+        return RedirectResponse(url="/", status_code=302)
+    tickets = load_tickets()
+    return templates.TemplateResponse("dashboard_ticket.html", {"request": request, "tickets": tickets, "username": username})
 
-    with open(TICKET_FILE, "r") as f:
-        tickets = json.load(f)
-    return templates.TemplateResponse("dashboard.html", {"request": request, "user": user, "tickets": tickets})
-
-@app.get("/create")
+@app.get("/create", response_class=HTMLResponse)
 def create_ticket_form(request: Request):
-    user = request.cookies.get("user")
-    if not user:
-        return RedirectResponse("/", status_code=302)
     return templates.TemplateResponse("create_ticket.html", {"request": request})
 
 @app.post("/create")
@@ -66,11 +79,10 @@ def create_ticket(
     priority: str = Form(...),
     category: str = Form(...)
 ):
-    with open(TICKET_FILE, "r") as f:
-        tickets = json.load(f)
-
+    tickets = load_tickets()
+    ticket_id = max([ticket["id"] for ticket in tickets], default=0) + 1
     new_ticket = {
-        "id": len(tickets) + 1,
+        "id": ticket_id,
         "customer_name": customer_name,
         "email": email,
         "contact": contact,
@@ -82,20 +94,19 @@ def create_ticket(
         "category": category
     }
     tickets.append(new_ticket)
-    with open(TICKET_FILE, "w") as f:
-        json.dump(tickets, f, indent=4)
+    save_tickets(tickets)
+    return RedirectResponse(url="/dashboard", status_code=302)
 
-    return RedirectResponse("/dashboard", status_code=302)
-
-@app.get("/edit/{ticket_id}")
-def edit_ticket_form(request: Request, ticket_id: int):
-    with open(TICKET_FILE, "r") as f:
-        tickets = json.load(f)
+@app.get("/edit/{ticket_id}", response_class=HTMLResponse)
+def edit_ticket(request: Request, ticket_id: int):
+    tickets = load_tickets()
     ticket = next((t for t in tickets if t["id"] == ticket_id), None)
+    if not ticket:
+        return RedirectResponse(url="/dashboard", status_code=302)
     return templates.TemplateResponse("edit_ticket.html", {"request": request, "ticket": ticket})
 
 @app.post("/edit/{ticket_id}")
-def edit_ticket(
+def update_ticket(
     request: Request,
     ticket_id: int,
     customer_name: str = Form(...),
@@ -108,9 +119,7 @@ def edit_ticket(
     priority: str = Form(...),
     category: str = Form(...)
 ):
-    with open(TICKET_FILE, "r") as f:
-        tickets = json.load(f)
-
+    tickets = load_tickets()
     for t in tickets:
         if t["id"] == ticket_id:
             t.update({
@@ -125,23 +134,12 @@ def edit_ticket(
                 "category": category
             })
             break
-
-    with open(TICKET_FILE, "w") as f:
-        json.dump(tickets, f, indent=4)
-
-    return RedirectResponse("/dashboard", status_code=302)
+    save_tickets(tickets)
+    return RedirectResponse(url="/dashboard", status_code=302)
 
 @app.get("/delete/{ticket_id}")
 def delete_ticket(ticket_id: int):
-    with open(TICKET_FILE, "r") as f:
-        tickets = json.load(f)
+    tickets = load_tickets()
     tickets = [t for t in tickets if t["id"] != ticket_id]
-    with open(TICKET_FILE, "w") as f:
-        json.dump(tickets, f, indent=4)
-    return RedirectResponse("/dashboard", status_code=302)
-
-@app.get("/logout")
-def logout():
-    response = RedirectResponse("/", status_code=302)
-    response.delete_cookie("user")
-    return response
+    save_tickets(tickets)
+    return RedirectResponse(url="/dashboard", status_code=302)
