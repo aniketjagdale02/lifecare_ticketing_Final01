@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .login-card {
+            max-width: 400px;
+            margin: 80px auto;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            background-color: white;
+        }
+        .form-control:focus {
+            box-shadow: none;
+            border-color: #198754;
+        }
+        .btn-login {
+            background-color: #198754;
+            border-color: #198754;
+        }
+        .btn-login:hover {
+            background-color: #157347;
+        }
+        .forgot-password {
+            margin-top: 10px;
+            font-size: 0.9rem;
+            text-align: center;
+            cursor: pointer;
+            color: #0d6efd;
+        }
+        .forgot-password:hover {
+            text-decoration: underline;
+        }
+        .helpline-text {
+            margin-top: 15px;
+            display: none;
+            font-size: 0.9rem;
+            color: #dc3545;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <h3 class="text-center mb-4">Ticketing Tool Login</h3>
+        <form method="post" action="/login">
+            <div class="mb-3">
+                <label>Username</label>
+                <input type="text" name="username" class="form-control" placeholder="Enter username" required>
+            </div>
+            <div class="mb-3">
+                <label>Password</label>
+                <input type="password" name="password" class="form-control" placeholder="Enter password" required>
+            </div>
+            <div class="d-grid">
+                <button type="submit" class="btn btn-login">Login</button>
+            </div>
+        </form>
+        <div class="forgot-password" onclick="showHelpline()">Forgot Password?</div>
+        <div class="helpline-text" id="helpline">Please contact IT helpline: 8108271708</div>
+    </div>
+
+    <script>
+        function showHelpline() {
+            document.getElementById("helpline").style.display = "block";
+        }
+    </script>
+</body>
+</html>
