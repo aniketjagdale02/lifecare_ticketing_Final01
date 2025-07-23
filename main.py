@@ -1,135 +1,106 @@
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request, Form, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-import sqlite3
-import uuid
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.status import HTTP_302_FOUND
+import models
+import database
 
-# Initialize FastAPI app
 app = FastAPI()
+app.add_middleware(SessionMiddleware, secret_key="supersecretkey")  # Replace with a real secret in production
 
-# Mount static files (CSS, JS)
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
-# Jinja2 Templates directory
-templates = Jinja2Templates(directory="app/templates")
+# Dummy credentials
+USER_CREDENTIALS = {
+    "admin": "admin123"
+}
 
-# Initialize SQLite DB
-def init_db():
-    conn = sqlite3.connect("tickets.db")
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS tickets (
-            id TEXT PRIMARY KEY,
-            customer_name TEXT,
-            email TEXT,
-            contact TEXT,
-            issue_title TEXT,
-            description TEXT,
-            status TEXT,
-            assigned_to TEXT,
-            priority TEXT,
-            category TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-init_db()
-
-# Route: Dashboard - View all tickets
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request):
-    conn = sqlite3.connect("tickets.db")
-    c = conn.cursor()
-    c.execute("SELECT * FROM tickets")
-    tickets = c.fetchall()
-    conn.close()
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
-        "tickets": tickets
-    })
+async def root():
+    return RedirectResponse(url="/login")
 
-# Route: Create Ticket - Form
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+
+@app.post("/login")
+async def login(request: Request, username: str = Form(...), password: str = Form(...)):
+    if username in USER_CREDENTIALS and USER_CREDENTIALS[username] == password:
+        request.session["user"] = username
+        return RedirectResponse(url="/dashboard", status_code=HTTP_302_FOUND)
+    else:
+        return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
+
+@app.get("/logout")
+async def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/login", status_code=HTTP_302_FOUND)
+
+def get_current_user(request: Request):
+    user = request.session.get("user")
+    if not user:
+        raise RedirectResponse(url="/login", status_code=HTTP_302_FOUND)
+    return user
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    if not request.session.get("user"):
+        return RedirectResponse(url="/login")
+    db = database.SessionLocal()
+    tickets = db.query(models.Ticket).all()
+    return templates.TemplateResponse("dashboard.html", {"request": request, "tickets": tickets})
+
 @app.get("/create", response_class=HTMLResponse)
-def create_ticket_form(request: Request):
+async def create_ticket_form(request: Request):
+    if not request.session.get("user"):
+        return RedirectResponse(url="/login")
     return templates.TemplateResponse("create_ticket.html", {"request": request})
 
-# Route: Create Ticket - Submission
 @app.post("/create")
-def create_ticket(
-    customer_name: str = Form(...),
-    email: str = Form(...),
-    contact: str = Form(...),
-    issue_title: str = Form(...),
-    description: str = Form(...),
-    status: str = Form(...),
-    assigned_to: str = Form(...),
-    priority: str = Form(...),
-    category: str = Form(...)
-):
-    ticket_id = str(uuid.uuid4())[:8]  # Unique ticket ID
-    conn = sqlite3.connect("tickets.db")
-    c = conn.cursor()
-    c.execute("""
-        INSERT INTO tickets VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        ticket_id, customer_name, email, contact, issue_title,
-        description, status, assigned_to, priority, category
-    ))
-    conn.commit()
-    conn.close()
-    return RedirectResponse("/", status_code=302)
+async def create_ticket(request: Request,
+                        title: str = Form(...),
+                        description: str = Form(...),
+                        status: str = Form(...)):
+    if not request.session.get("user"):
+        return RedirectResponse(url="/login")
+    db = database.SessionLocal()
+    new_ticket = models.Ticket(title=title, description=description, status=status)
+    db.add(new_ticket)
+    db.commit()
+    return RedirectResponse(url="/dashboard", status_code=HTTP_302_FOUND)
 
-# Route: Edit Ticket - Form
 @app.get("/edit/{ticket_id}", response_class=HTMLResponse)
-def edit_ticket_form(request: Request, ticket_id: str):
-    conn = sqlite3.connect("tickets.db")
-    c = conn.cursor()
-    c.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,))
-    ticket = c.fetchone()
-    conn.close()
-    return templates.TemplateResponse("edit_ticket.html", {
-        "request": request,
-        "ticket": ticket
-    })
+async def edit_ticket_form(request: Request, ticket_id: int):
+    if not request.session.get("user"):
+        return RedirectResponse(url="/login")
+    db = database.SessionLocal()
+    ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
+    return templates.TemplateResponse("edit_ticket.html", {"request": request, "ticket": ticket})
 
-# Route: Edit Ticket - Submission
 @app.post("/edit/{ticket_id}")
-def update_ticket(
-    ticket_id: str,
-    customer_name: str = Form(...),
-    email: str = Form(...),
-    contact: str = Form(...),
-    issue_title: str = Form(...),
-    description: str = Form(...),
-    status: str = Form(...),
-    assigned_to: str = Form(...),
-    priority: str = Form(...),
-    category: str = Form(...)
-):
-    conn = sqlite3.connect("tickets.db")
-    c = conn.cursor()
-    c.execute("""
-        UPDATE tickets SET
-            customer_name=?, email=?, contact=?, issue_title=?,
-            description=?, status=?, assigned_to=?, priority=?, category=?
-        WHERE id=?
-    """, (
-        customer_name, email, contact, issue_title,
-        description, status, assigned_to, priority, category,
-        ticket_id
-    ))
-    conn.commit()
-    conn.close()
-    return RedirectResponse("/", status_code=302)
+async def edit_ticket(request: Request, ticket_id: int,
+                      title: str = Form(...),
+                      description: str = Form(...),
+                      status: str = Form(...)):
+    if not request.session.get("user"):
+        return RedirectResponse(url="/login")
+    db = database.SessionLocal()
+    ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
+    ticket.title = title
+    ticket.description = description
+    ticket.status = status
+    db.commit()
+    return RedirectResponse(url="/dashboard", status_code=HTTP_302_FOUND)
 
-# Route: Delete Ticket
 @app.get("/delete/{ticket_id}")
-def delete_ticket(ticket_id: str):
-    conn = sqlite3.connect("tickets.db")
-    c = conn.cursor()
-    c.execute("DELETE FROM tickets WHERE id = ?", (ticket_id,))
-    conn.commit()
-    conn.close()
-    return RedirectResponse("/", status_code=302)
+async def delete_ticket(request: Request, ticket_id: int):
+    if not request.session.get("user"):
+        return RedirectResponse(url="/login")
+    db = database.SessionLocal()
+    ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
+    db.delete(ticket)
+    db.commit()
+    return RedirectResponse(url="/dashboard", status_code=HTTP_302_FOUND)
